@@ -7,6 +7,11 @@ defmodule FxcmAlchemy.Portfolio do
   they carry that id, position reports that close on FXCM's close indicators,
   and an account summary built from the CollateralReport (`BA`) / ack (`BG`).
 
+  FXCM sends one CollateralReport per account of the login. Each is filed under
+  the account it reports on, so the summary is that of the account in force and
+  the login's accounts are the ones `FixAlchemy.Portfolio.list_accounts/2`
+  offers.
+
   Order tracking, the get/broadcast machinery, and the GenServer lifecycle come
   from the base; only the FXCM-specific message flow is overridden.
   """
@@ -24,13 +29,12 @@ defmodule FxcmAlchemy.Portfolio do
   @impl FixAlchemy.Portfolio
   def handle_message("BA", raw_msg, _meta, state) do
     msg = Base.decode(raw_msg, state)
-    account = Map.get(msg, :account)
-    %{state | account: account || state.account, collateral: Map.delete(msg, :raw)}
+    Base.put_collateral(state, Map.get(msg, :account), Map.delete(msg, :raw))
   end
 
   def handle_message("BG", raw_msg, _meta, state) do
     msg = Base.decode(raw_msg, state)
-    %{state | collateral: Map.delete(msg, :raw)}
+    Base.put_collateral(state, nil, Map.delete(msg, :raw))
   end
 
   def handle_message(type, raw_msg, meta, state), do: super(type, raw_msg, meta, state)
@@ -123,7 +127,14 @@ defmodule FxcmAlchemy.Portfolio do
   end
 
   @impl FixAlchemy.Portfolio
-  def build_account_summary(%{collateral: collateral}) when is_map(collateral) do
+  def build_account_summary(state) do
+    case Base.collateral(state) do
+      collateral when is_map(collateral) -> collateral_summary(collateral, state)
+      _none -> Base.standard_account_summary(state)
+    end
+  end
+
+  defp collateral_summary(collateral, state) do
     balance = Base.parse_float(Map.get(collateral, :end_cash))
     equity = nonzero_or(Base.parse_float(Map.get(collateral, :total_net_value)), balance)
     margin_used = Base.parse_float(Map.get(collateral, :fxcm_used_margin))
@@ -132,7 +143,7 @@ defmodule FxcmAlchemy.Portfolio do
       nonzero_or(Base.parse_float(Map.get(collateral, :margin_excess)), equity - margin_used)
 
     %{
-      account_id: Map.get(collateral, :account) || "N/A",
+      account_id: Map.get(collateral, :account) || Base.active_account(state) || "N/A",
       balance: balance,
       equity: equity,
       margin_used: margin_used,
@@ -141,20 +152,6 @@ defmodule FxcmAlchemy.Portfolio do
       unrealized_pnl: 0.0
     }
   end
-
-  def build_account_summary(%{account: account}) when is_binary(account) and account != "" do
-    %{
-      account_id: account,
-      balance: 0.0,
-      equity: 0.0,
-      margin_used: 0.0,
-      margin_available: 0.0,
-      currency: nil,
-      unrealized_pnl: 0.0
-    }
-  end
-
-  def build_account_summary(_state), do: nil
 
   defp apply_fill(positions, msg, order, order_id, state) do
     symbol = Map.get(msg, :symbol)

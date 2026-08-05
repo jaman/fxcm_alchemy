@@ -143,5 +143,25 @@ defmodule FxcmAlchemy.PortfolioTest do
       assert summary.account_id == "DISCOVERED_ACC"
       assert summary.balance == 10_000.0
     end
+
+    test "a report is filed under its own account, and the selected one is summarized", %{
+      connection_id: connection_id
+    } do
+      feed(connection_id, "BA", [{"1", "ACC_A"}, {"922", "10000"}])
+      feed(connection_id, "BA", [{"1", "ACC_B"}, {"922", "25000"}])
+
+      assert Portfolio.list_accounts(connection_id, :trading) == ["ACC_A", "ACC_B"]
+
+      summary = Portfolio.get_account_summary(connection_id, :trading)
+      assert summary.account_id == "ACC_A"
+      assert summary.balance == 10_000.0
+
+      assert Portfolio.set_active_account(connection_id, :trading, "ACC_B") == :ok
+
+      summary = Portfolio.get_account_summary(connection_id, :trading)
+      assert summary.account_id == "ACC_B"
+      assert summary.balance == 25_000.0
+      assert Portfolio.get_collateral(connection_id, :trading).account == "ACC_B"
+    end
   end
 end

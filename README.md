@@ -97,12 +97,13 @@ driving it through `FixAlchemy.Backend` sets both from
 
 ## The account
 
-`:account` is optional. Left out, the session discovers it at login: it sends
-CollateralInquiry (`BB`) after logon and takes the account from Account (tag `1`)
-on a CollateralReport (`BA`) that comes back, then requests its positions and
+`:account` is optional, and is the account to trade while FXCM reports none.
+Left out, the session discovers accounts at login: it sends CollateralInquiry
+(`BB`) after logon and takes each account from Account (tag `1`) on the
+CollateralReports (`BA`) that come back, then requests their positions and
 orders. Supplying it skips the CollateralInquiry and requests positions and
-orders straight after logon. Either way the account is sent as tag `1` on every
-order.
+orders straight after logon. Either way the account in force is sent as tag `1`
+on every order.
 
 Until it is known, orders are refused:
 
@@ -117,8 +118,21 @@ The session marks the `:account` milestone once it has one:
 FixAlchemy.Client.milestone_reached?(conn, :account)
 ```
 
-A login carrying several accounts gets one of them. Supply `:account` to trade a
-specific one.
+A login carrying several accounts holds them all, and trades the first reported
+until another is selected:
+
+```elixir
+FixAlchemy.Trading.list_accounts(conn)
+#=> ["10001", "10002"]
+
+FixAlchemy.Trading.set_active_account(conn, "10002")
+```
+
+A single order goes elsewhere with `:account`:
+
+```elixir
+FxcmAlchemy.order(conn, "EUR/USD", 1000, :buy, account: "10001")
+```
 
 ## Trading
 
