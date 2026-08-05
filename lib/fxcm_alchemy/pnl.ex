@@ -10,8 +10,8 @@ defmodule FxcmAlchemy.PnL do
     * otherwise → convert via `ACC/YYY` (divide) or `YYY/ACC` (multiply),
       whichever the price map provides
 
-  Symbols use the platform's slashed format (`"GBP/JPY"`), which is also how
-  the price map is keyed.
+  Symbols use the slashed format (`"GBP/JPY"`), which is also how the price map
+  is keyed.
   """
 
   @type price :: %{bid: number(), ask: number()}

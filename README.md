@@ -10,8 +10,8 @@ sources of historical candles. Everything else — order entry, account reads,
 market data subscription — comes from the engine and is re-exported here, so
 `FxcmAlchemy` is the single module a caller talks to.
 
-It also registers itself as a platform backend (`:fxcm`), which is how
-trade_alchemy picks it up.
+It also implements `FixAlchemy.Backend` as `:fxcm`, so a host managing
+connections across several venues can pick it up by depending on it.
 
 ## What is FXCM-specific
 
@@ -61,7 +61,7 @@ names the `9xxx` tags this adapter reads and is worth using if you have it.
 
 ## Quick start
 
-Standalone, without the platform:
+A session on its own, with no host application around it:
 
 ```elixir
 {:ok, conn} =
@@ -89,7 +89,8 @@ FixAlchemy.disconnect(conn)
 ```
 
 `defer_ready: true` and the three handlers are what make it an FXCM session
-rather than a plain FIX one. The platform sets both for you.
+rather than a plain FIX one. A host driving it through `FixAlchemy.Backend`
+sets both from `FxcmAlchemy.TradingBackend`.
 
 This starts the session and nothing else. `FxcmAlchemy.PositionTracker`, which
 marks P&L, is started per connection by the backend and not by
@@ -136,7 +137,7 @@ automatically by the backend. It holds positions and last prices, marks
 unrealized P&L in the account's base currency, and publishes the result on
 `"position:<connection_id>"` and `"account:<connection_id>"`.
 
-Outside the platform, start it alongside the session yourself:
+Where the backend is not doing it for you, start it alongside the session:
 
 ```elixir
 {:ok, _tracker} =
@@ -233,10 +234,11 @@ end
 (the connection's stored config map) and `:connection_id`. `time` is a Unix
 timestamp in seconds.
 
-## Use from trade_alchemy
+## As a FixAlchemy backend
 
-The platform discovers `FxcmAlchemy.TradingBackend` because `fxcm_alchemy` is a
-dependency — there is nothing to register. It contributes:
+`FxcmAlchemy.TradingBackend` implements `FixAlchemy.Backend`, so a host that
+manages connections across several venues discovers it by having
+`fxcm_alchemy` as a dependency — there is nothing to register. It contributes:
 
 - the backend id `:fxcm`, shown as "FXCM (FIX)"
 - the standard connection fields (host, port, TLS, comp ids, username,
@@ -245,23 +247,15 @@ dependency — there is nothing to register. It contributes:
 - the three handlers, deferred readiness, and FXCM's close semantics
 - a `FxcmAlchemy.PositionTracker` per trading connection
 
-Configure the two PubSub settings alongside the other backends:
-
-```elixir
-config :fxcm_alchemy,
-  pubsub_module: TradeAlchemy.PubSub,
-  market_data_subscriber: TradeAlchemy.Trading.SubscriptionManager
-```
-
-Connection credentials are entered in the platform UI and stored by the
-platform, not by this package.
+The host supplies each connection's own configuration, including credentials;
+this package stores none of it.
 
 ## Credentials
 
 This package holds no credentials and none belong in it. Passwords arrive as
-the `:password` connection option (or the stored connection config in the
-platform) and are only ever written to the wire, in the Logon and UserRequest
-(`BE`) messages. Nothing here logs them.
+the `:password` connection option, or in the connection config a host passes
+to the backend, and are only ever written to the wire, in the Logon and
+UserRequest (`BE`) messages. Nothing here logs them.
 
 For a standalone session, read them from the environment — `System.fetch_env!/1`
 as in the quick start — or from a config file kept out of version control.

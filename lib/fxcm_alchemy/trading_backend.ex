@@ -1,6 +1,6 @@
 defmodule FxcmAlchemy.TradingBackend do
   @moduledoc """
-  FXCM's platform trading backend (id `:fxcm`).
+  FXCM's `FixAlchemy.Backend` implementation (id `:fxcm`).
 
   Extends the baseline `FixAlchemy.Backend` with FXCM specifics: the FXCM
   handshake/market-data/portfolio handlers, deferred readiness (business
@@ -8,7 +8,7 @@ defmodule FxcmAlchemy.TradingBackend do
   `FxcmAlchemy`, the collateral/fxlite/historical config fields, and a P&L
   position tracker started per trading connection.
 
-  Auto-discovered by the platform when `fxcm_alchemy` is a dependency.
+  Discovered through `FixAlchemy.Backend` when `fxcm_alchemy` is a dependency.
   """
 
   use FixAlchemy.Backend
