@@ -5,10 +5,13 @@ defmodule FxcmAlchemy.PositionTracker do
   Subscribes to position updates from FIX Client and market data updates,
   calculates unrealized P&L, and broadcasts enriched position and account data.
 
-  Publishing goes through `FixAlchemy.PubSub`, on the server given by
-  `config :fxcm_alchemy, :pubsub_module` or, failing that, the engine's own
+  Publishing goes through `FixAlchemy.PubSub`, on the server given by the
+  `:pubsub_module` start option or, failing that, the engine's own
   `config :fix_alchemy, :pubsub_server`. Updates are published on
   `"position:<connection_id>"` and `"account:<connection_id>"`.
+
+  `:market_data_subscriber` names the module the tracker asks for prices, so a
+  tracker is told what to subscribe through rather than reading it globally.
 
   With no server configured the tracker runs and publishes nothing. A host
   without `phoenix_pubsub` consumes the updates by configuring its own
@@ -49,10 +52,8 @@ defmodule FxcmAlchemy.PositionTracker do
     connection_id = Keyword.fetch!(opts, :connection_id)
     base_currency = Keyword.get(opts, :base_currency, "USD")
 
-    pubsub_module =
-      Application.get_env(:fxcm_alchemy, :pubsub_module) || FixAlchemy.PubSub.server()
-
-    subscriber = Application.get_env(:fxcm_alchemy, :market_data_subscriber)
+    pubsub_module = Keyword.get(opts, :pubsub_module) || FixAlchemy.PubSub.server()
+    subscriber = Keyword.get(opts, :market_data_subscriber)
 
     subscribe(pubsub_module, "position_raw:#{connection_id}")
 
@@ -106,42 +107,7 @@ defmodule FxcmAlchemy.PositionTracker do
     to_subscribe = MapSet.difference(new_symbols, old_symbols) |> MapSet.to_list()
     to_unsubscribe = MapSet.difference(old_symbols, new_symbols) |> MapSet.to_list()
 
-    Enum.each(to_subscribe, fn symbol ->
-      Logger.debug("PositionTracker subscribing to market data for #{symbol}")
-
-      topic = "instruments:#{state.connection_id}:#{symbol}"
-      subscribe(state.pubsub_module, topic)
-
-      case register_subscription(
-             state.market_data_subscriber,
-             self(),
-             topic,
-             %{source: :position_tracker}
-           ) do
-        {:ok, :created} ->
-          Logger.debug("First subscriber - requesting market data from broker for #{symbol}")
-
-          case FxcmAlchemy.TradingBackend.subscribe_market_data(
-                 state.connection_id,
-                 [symbol],
-                 state.pubsub_module,
-                 topic
-               ) do
-            :ok ->
-              Logger.debug("Successfully requested market data for #{symbol}")
-
-            {:error, reason} ->
-              Logger.warning("Failed to request market data for #{symbol}: #{inspect(reason)}")
-              Process.send_after(self(), {:retry_subscribe, symbol}, 2000)
-          end
-
-        {:ok, :joined} ->
-          Logger.debug("Joined existing subscription for #{symbol}")
-
-        {:error, reason} ->
-          Logger.warning("Failed to register subscription for #{symbol}: #{inspect(reason)}")
-      end
-    end)
+    Enum.each(to_subscribe, &subscribe_symbol(state, &1))
 
     Enum.each(to_unsubscribe, fn symbol ->
       Logger.debug("PositionTracker unsubscribing from market data for #{symbol}")
@@ -237,31 +203,75 @@ defmodule FxcmAlchemy.PositionTracker do
     |> Map.new()
   end
 
+  defp subscribe_symbol(state, symbol) do
+    Logger.debug("PositionTracker subscribing to market data for #{symbol}")
+
+    topic = "instruments:#{state.connection_id}:#{symbol}"
+    subscribe(state.pubsub_module, topic)
+
+    registered =
+      register_subscription(
+        state.market_data_subscriber,
+        self(),
+        topic,
+        %{source: :position_tracker}
+      )
+
+    handle_registration(registered, state, symbol, topic)
+  end
+
+  defp handle_registration({:ok, :created}, state, symbol, topic) do
+    Logger.debug("First subscriber - requesting market data from broker for #{symbol}")
+
+    requested =
+      FxcmAlchemy.TradingBackend.subscribe_market_data(
+        state.connection_id,
+        [symbol],
+        state.pubsub_module,
+        topic
+      )
+
+    log_market_data_request(requested, symbol)
+  end
+
+  defp handle_registration({:ok, :joined}, _state, symbol, _topic) do
+    Logger.debug("Joined existing subscription for #{symbol}")
+  end
+
+  defp handle_registration({:error, reason}, _state, symbol, _topic) do
+    Logger.warning("Failed to register subscription for #{symbol}: #{inspect(reason)}")
+  end
+
+  defp log_market_data_request(:ok, symbol) do
+    Logger.debug("Successfully requested market data for #{symbol}")
+  end
+
+  defp log_market_data_request({:error, reason}, symbol) do
+    Logger.warning("Failed to request market data for #{symbol}: #{inspect(reason)}")
+    Process.send_after(self(), {:retry_subscribe, symbol}, 2000)
+  end
+
   defp normalize_position(pos) when is_map(pos) do
     data = if Map.has_key?(pos, :data), do: pos.data, else: pos
-
-    pos_id =
-      Map.get(data, :position_id) || Map.get(data, :fxcm_pos_id) || Map.get(pos, :position_id) ||
-        Map.get(pos, :fxcm_pos_id)
-
-    quantity = parse_float(Map.get(data, :size) || Map.get(pos, :size)) || 0.0
-
-    entry =
-      parse_float(
-        Map.get(data, :avg_price) || Map.get(data, :settl_price) || Map.get(pos, :avg_price)
-      ) || 0.0
+    entry = reported_float(data, pos, [:avg_price, :settl_price])
 
     %{
-      id: pos_id,
-      symbol: Map.get(data, :symbol) || Map.get(pos, :symbol),
-      side: normalize_side(Map.get(data, :side) || Map.get(pos, :side)),
-      quantity: quantity,
+      id: reported(data, pos, [:position_id, :fxcm_pos_id]),
+      symbol: reported(data, pos, [:symbol]),
+      side: normalize_side(reported(data, pos, [:side])),
+      quantity: reported_float(data, pos, [:size]),
       entry_price: entry,
       current_price: entry,
       unrealized_pnl: 0.0,
-      order_id: Map.get(data, :order_id) || Map.get(pos, :order_id)
+      order_id: reported(data, pos, [:order_id])
     }
   end
+
+  defp reported(data, pos, keys) do
+    Enum.find_value(keys, fn key -> Map.get(data, key) || Map.get(pos, key) end)
+  end
+
+  defp reported_float(data, pos, keys), do: parse_float(reported(data, pos, keys)) || 0.0
 
   defp normalize_side(nil), do: :buy
   defp normalize_side(side) when side in [:buy, "buy", "1"], do: :buy

@@ -43,7 +43,9 @@ defmodule FxcmAlchemy.TradingBackend do
         tracker_opts = [
           connection_id: connection_id,
           base_currency: Keyword.get(config, :base_currency, "USD"),
-          initial_balance: Keyword.get(config, :initial_balance, 10_000.0)
+          initial_balance: Keyword.get(config, :initial_balance, 10_000.0),
+          pubsub_module: Keyword.get(config, :pubsub_module),
+          market_data_subscriber: Keyword.get(config, :market_data_subscriber)
         ]
 
         DynamicSupervisor.start_child(
@@ -71,12 +73,14 @@ defmodule FxcmAlchemy.TradingBackend do
         {:error, :not_supported}
 
       modules ->
-        Enum.reduce_while(modules, {:error, :not_supported}, fn module, _last_error ->
-          case module.fetch_candles(symbol, opts) do
-            {:ok, candles} -> {:halt, {:ok, candles}}
-            {:error, reason} -> {:cont, {:error, reason}}
-          end
-        end)
+        Enum.reduce_while(modules, {:error, :not_supported}, &first_candles(&1, &2, symbol, opts))
+    end
+  end
+
+  defp first_candles(module, _last_error, symbol, opts) do
+    case module.fetch_candles(symbol, opts) do
+      {:ok, candles} -> {:halt, {:ok, candles}}
+      {:error, reason} -> {:cont, {:error, reason}}
     end
   end
 

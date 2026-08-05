@@ -41,16 +41,15 @@ defmodule FxcmAlchemy.PositionTrackerTest do
     assert_receive :fix_server_connected, 2000
 
     on_exit(fn ->
-      Application.delete_env(:fxcm_alchemy, :pubsub_module)
       Application.delete_env(:fix_alchemy, :pubsub)
     end)
 
     {:ok, connection_id: connection_id}
   end
 
-  defp start_tracker(connection_id) do
+  defp start_tracker(connection_id, opts \\ []) do
     start_supervised!(
-      {PositionTracker, [connection_id: connection_id, base_currency: "USD"]},
+      {PositionTracker, [connection_id: connection_id, base_currency: "USD"] ++ opts},
       restart: :temporary
     )
   end
@@ -86,12 +85,13 @@ defmodule FxcmAlchemy.PositionTrackerTest do
   end
 
   describe "resolving the pubsub server" do
-    test "prefers the fxcm_alchemy setting", %{connection_id: connection_id} do
-      Application.put_env(:fxcm_alchemy, :pubsub_module, MyApp.PubSub)
+    test "prefers the tracker's own option", %{connection_id: connection_id} do
       Application.put_env(:fix_alchemy, :pubsub_server, OtherApp.PubSub)
       on_exit(fn -> Application.delete_env(:fix_alchemy, :pubsub_server) end)
 
-      assert :sys.get_state(start_tracker(connection_id)).pubsub_module == MyApp.PubSub
+      tracker = start_tracker(connection_id, pubsub_module: MyApp.PubSub)
+
+      assert :sys.get_state(tracker).pubsub_module == MyApp.PubSub
     end
 
     test "falls back to the engine's server", %{connection_id: connection_id} do
@@ -109,13 +109,12 @@ defmodule FxcmAlchemy.PositionTrackerTest do
   describe "with a pubsub server configured" do
     setup do
       Process.register(self(), :test_pubsub_server)
-      Application.put_env(:fxcm_alchemy, :pubsub_module, :test_pubsub_server)
       Application.put_env(:fix_alchemy, :pubsub, RecordingPubSub)
       :ok
     end
 
     test "broadcasts positions and account on a price update", %{connection_id: connection_id} do
-      tracker = start_tracker(connection_id)
+      tracker = start_tracker(connection_id, pubsub_module: :test_pubsub_server)
 
       send(tracker, price_update(connection_id))
 

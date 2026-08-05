@@ -5,7 +5,7 @@
   "duckdbex": {:hex, :duckdbex, "0.4.1", "776c5b16bb6db2229b158e10f3d07d82dc5a004a6c8ddaf8c8b66d6f29bd1c93", [:make, :mix], [{:cc_precompiler, "~> 0.1", [hex: :cc_precompiler, repo: "hexpm", optional: false]}, {:elixir_make, "~> 0.8", [hex: :elixir_make, repo: "hexpm", optional: false]}], "hexpm", "499c278bc6148fb248a90a4208fd6e862f322be43821cd6795fbef3eb4e93423"},
   "elixir_make": {:hex, :elixir_make, "0.10.0", "16577e2583a79bb79237bbff349619ef5d80afffc07eac6e4faf0d00e2ddaf7d", [:mix], [], "hexpm", "dc1f09fb7fa68866b886abd5f0f3c83553b1a19a52359a899e92af1bb3b31982"},
   "file_system": {:hex, :file_system, "1.1.1", "31864f4685b0148f25bd3fbef2b1228457c0c89024ad67f7a81a3ffbc0bbad3a", [:mix], [], "hexpm", "7a15ff97dfe526aeefb090a7a9d3d03aa907e100e262a0f8f7746b78f8f87a5d"},
-  "fix_alchemy": {:hex, :fix_alchemy, "0.2.0", "c1ff6ec1412b8fe254c57a6e5ca39b3be8e2c081ac3a087d62f23f42b95d135a", [:mix], [], "hexpm", "352a6a4a5f184ae5219fd4dc5010319383115041ffd592d20ca6eb85607898d2"},
+  "fix_alchemy": {:hex, :fix_alchemy, "0.3.0", "133866ecc7933e07d2a0e571ead72c08292baa809b4a8420c42413141da0bf9a", [:mix], [], "hexpm", "6d953cb9f848ca84d1ac9c2b8ccaec9e615bec1d400d43c2d95898862fb8c1c3"},
   "fxlite_alchemy": {:git, "https://github.com/jaman/fxlite_alchemy.git", "560b94f426fc7d7ee7af93d7891337ba6edd4196", []},
   "jason": {:hex, :jason, "1.4.5", "2e3a008590b0b8d7388c20293e9dcc9cf3e5d642fd2a114e4cbbb52e595d940a", [:mix], [{:decimal, "~> 1.0 or ~> 2.0 or ~> 3.0", [hex: :decimal, repo: "hexpm", optional: true]}], "hexpm", "b0c823996102bcd0239b3c2444eb00409b72f6a140c1950bc8b457d836b30684"},
 }

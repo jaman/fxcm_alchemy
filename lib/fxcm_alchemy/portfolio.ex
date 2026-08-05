@@ -82,48 +82,61 @@ defmodule FxcmAlchemy.Portfolio do
       source: state.process_name
     )
 
-    cond do
-      !pos_id ->
-        Logger.warning("PositionReport missing pos_id, not storing", source: state.process_name)
-        positions
+    reported = %{
+      pos_id: pos_id,
+      closed?: !!(close_cl_ord_id || close_pnl),
+      trade_report?: pos_req_type == "1",
+      net: net
+    }
 
-      close_cl_ord_id || close_pnl ->
-        Logger.info("Position closed via PositionReport (close indicators present): #{pos_id}",
-          source: state.process_name
-        )
+    apply_reported_position(reported, positions, state, fn ->
+      %{
+        symbol: symbol,
+        size: size,
+        side: side,
+        via: :report,
+        avg_price: open_price(field_map, msg),
+        unrealized_pl: Map.get(field_map, "900") || Map.get(msg, :settl_curr_amt),
+        position_id: pos_id,
+        order_id: Map.get(msg, :order_id),
+        last_update: DateTime.utc_now(),
+        data: Map.delete(msg, :raw)
+      }
+    end)
+  end
 
-        Map.delete(positions, pos_id)
+  defp apply_reported_position(%{pos_id: nil}, positions, state, _build) do
+    Logger.warning("PositionReport missing pos_id, not storing", source: state.process_name)
+    positions
+  end
 
-      pos_req_type == "1" ->
-        Logger.debug("Skipping trade report (not a position snapshot): #{pos_id}",
-          source: state.process_name
-        )
+  defp apply_reported_position(%{closed?: true} = reported, positions, state, _build) do
+    Logger.info(
+      "Position closed via PositionReport (close indicators present): #{reported.pos_id}",
+      source: state.process_name
+    )
 
-        positions
+    Map.delete(positions, reported.pos_id)
+  end
 
-      net == 0 ->
-        Logger.info("Position closed via PositionReport (qty=0): #{pos_id}",
-          source: state.process_name
-        )
+  defp apply_reported_position(%{trade_report?: true} = reported, positions, state, _build) do
+    Logger.debug("Skipping trade report (not a position snapshot): #{reported.pos_id}",
+      source: state.process_name
+    )
 
-        Map.delete(positions, pos_id)
+    positions
+  end
 
-      true ->
-        position = %{
-          symbol: symbol,
-          size: size,
-          side: side,
-          via: :report,
-          avg_price: open_price(field_map, msg),
-          unrealized_pl: Map.get(field_map, "900") || Map.get(msg, :settl_curr_amt),
-          position_id: pos_id,
-          order_id: Map.get(msg, :order_id),
-          last_update: DateTime.utc_now(),
-          data: Map.delete(msg, :raw)
-        }
+  defp apply_reported_position(%{net: 0} = reported, positions, state, _build) do
+    Logger.info("Position closed via PositionReport (qty=0): #{reported.pos_id}",
+      source: state.process_name
+    )
 
-        Map.put(positions, pos_id, position)
-    end
+    Map.delete(positions, reported.pos_id)
+  end
+
+  defp apply_reported_position(reported, positions, _state, build) do
+    Map.put(positions, reported.pos_id, build.())
   end
 
   @impl FixAlchemy.Portfolio

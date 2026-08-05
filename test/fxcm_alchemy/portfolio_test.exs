@@ -23,8 +23,7 @@ defmodule FxcmAlchemy.PortfolioTest do
   defp build_message(msg_type, fields) do
     body =
       ([{"35", msg_type}, {"49", "FAKE"}, {"56", "CLIENT"}] ++ fields)
-      |> Enum.map(fn {tag, value} -> "#{tag}=#{value}" end)
-      |> Enum.join(@soh)
+      |> Enum.map_join(@soh, fn {tag, value} -> "#{tag}=#{value}" end)
 
     body = body <> @soh
     framed = "8=FIX.4.4#{@soh}9=#{byte_size(body)}#{@soh}#{body}"
