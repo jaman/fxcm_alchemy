@@ -42,12 +42,11 @@ def deps do
 end
 ```
 
-Use `path: "../fxcm_alchemy"` instead when working on this package and its host
-together; a path dependency picks up edits on the next compile, where a git one
+Use `path: "../fxcm_alchemy"` when developing both together; a git dependency
 stays pinned to the SHA in `mix.lock` until `mix deps.update fxcm_alchemy`.
 
-`fxlite_alchemy` and `duckdbex` are optional and only needed for two of the
-three historical candle sources — see [Historical candles](#historical-candles).
+`fxlite_alchemy` and `duckdbex` are optional — see
+[Historical candles](#historical-candles).
 
 FXCM speaks FIX 4.4. Point the engine at a dictionary, either globally or per
 connection:
@@ -73,7 +72,6 @@ A session on its own, with no host application around it:
     password: System.fetch_env!("FXCM_PASSWORD"),
     sender_comp_id: "your_username",
     target_comp_id: "FXCM",
-    account: "01234567",
     spec_file: "priv/specs/FIX44.xml",
     defer_ready: true,
     handlers: [FxcmAlchemy.Session, FxcmAlchemy.MarketData, FxcmAlchemy.Portfolio]
@@ -92,10 +90,37 @@ FixAlchemy.disconnect(conn)
 rather than a plain FIX one. A host driving it through `FixAlchemy.Backend`
 sets both from `FxcmAlchemy.TradingBackend`.
 
-This starts the session and nothing else. `FxcmAlchemy.PositionTracker`, which
-marks P&L, is started per connection by the backend and not by
-`FixAlchemy.connect/1` — start it yourself if you want it, as
-[Positions and P&L](#positions-and-pl) describes.
+`:account` is optional and left out here; FXCM reports it at login. See
+[The account](#the-account).
+
+`FixAlchemy.connect/1` starts the session only. For P&L, start
+[`FxcmAlchemy.PositionTracker`](#positions-and-pl) as well.
+
+## The account
+
+`:account` is optional. Left out, the session discovers it at login: it sends
+CollateralInquiry (`BB`) after logon and takes the account from Account (tag `1`)
+on a CollateralReport (`BA`) that comes back, then requests its positions and
+orders. Supplying it skips the CollateralInquiry and requests positions and
+orders straight after logon. Either way the account is sent as tag `1` on every
+order.
+
+Until it is known, orders are refused rather than sent:
+
+```elixir
+FxcmAlchemy.order(conn, "EUR/USD", 1000, :buy)
+#=> {:error, :account_unknown}
+```
+
+The session marks the `:account` milestone once it has one, so gate on that
+rather than sleeping:
+
+```elixir
+FixAlchemy.Client.milestone_reached?(conn, :account)
+```
+
+A login carrying several accounts gets one of them. Supply `:account` to trade a
+specific one.
 
 ## Trading
 
@@ -147,8 +172,8 @@ Where the backend is not doing it for you, start it alongside the session:
   )
 ```
 
-It registers under the connection id, so start it once per connection and after
-the session, whose portfolio process it reads the account from.
+Start it once per connection, after the session; it reads the account from the
+session's portfolio process.
 
 `FxcmAlchemy.PnL` does the conversion and is usable on its own:
 
@@ -197,8 +222,8 @@ config :fix_alchemy, pubsub: MyApp.FixEvents
 config :fxcm_alchemy, pubsub_module: :my_app_events
 ```
 
-The server name is handed to your `broadcast/3` untouched and only has to be
-something other than `nil`, which is what tells the tracker anyone is listening.
+The server name is passed to your `broadcast/3` untouched and only has to be
+non-`nil`.
 
 ## Historical candles
 
