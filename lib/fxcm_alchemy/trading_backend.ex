@@ -20,15 +20,7 @@ defmodule FxcmAlchemy.TradingBackend do
       | id: :fxcm,
         name: "FXCM (FIX)",
         fields: FixAlchemy.Backend.default_fields() ++ fxcm_fields(),
-        groups:
-          FixAlchemy.Backend.default_groups() ++
-            [
-              %{
-                id: :historical,
-                label: "Historical Data",
-                description: "Where chart history is fetched from"
-              }
-            ]
+        groups: FixAlchemy.Backend.default_groups()
     }
   end
 
@@ -90,32 +82,6 @@ defmodule FxcmAlchemy.TradingBackend do
 
   defp fxcm_fields do
     [
-      %{
-        name: :historical_source,
-        type: :select,
-        group: :historical,
-        overridable: false,
-        label: "Historical Candles",
-        required: false,
-        options: [
-          %{label: "FXCM CandleData (public, delayed)", value: "fxcm_candledata"},
-          %{label: "FXCM fxlite platform (current)", value: "fxcm_fxlite"},
-          %{label: "FIX session (native)", value: "fix_session"},
-          %{label: "Custom module", value: "custom"},
-          %{label: "None", value: "none"}
-        ],
-        description: "Source for chart history; FIX itself carries no historical data"
-      },
-      %{
-        name: :historical_module,
-        type: :string,
-        group: :historical,
-        overridable: false,
-        label: "Historical Module",
-        required: false,
-        description:
-          "Module implementing FxcmAlchemy.HistoricalCandles (used when source is Custom)"
-      },
       %{
         name: :fxlite_username,
         type: :string,
