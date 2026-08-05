@@ -7,19 +7,19 @@ FxcmAlchemy supplies the parts FXCM does its own way: the post-logon
 handshake, positions keyed by FXCMPosID, the CollateralReport account view,
 FXCM's market-data and historical fields in the `9xxx` tag range, and three
 sources of historical candles. Everything else — order entry, account reads,
-market data subscription — comes from the engine and is re-exported here, so
-`FxcmAlchemy` is the single module a caller talks to.
+market data subscription — comes from the engine, re-exported here, so
+`FxcmAlchemy` is the one module a caller talks to.
 
-It also implements `FixAlchemy.Backend` as `:fxcm`, so a host managing
-connections across several venues can pick it up by depending on it.
+It implements `FixAlchemy.Backend` as `:fxcm`. A host discovers it by depending
+on this package.
 
 ## What is FXCM-specific
 
 - **Login.** FXCM does not consider a session usable at Logon. After `A` it
   sends UserRequest (`BE`), then CollateralInquiry (`BB`) on the UserResponse
   (`BF`), and the session is ready on the ack (`BG`). The CollateralReport
-  (`BA`) is what tells the adapter its account number; positions and orders are
-  requested from there.
+  (`BA`) carries the account number; positions and orders are requested from
+  there.
 - **Positions.** FXCM legs positions by FXCMPosID (`9041`) rather than netting
   them. A fill is only recognised as a position when it carries that tag, and
   closing one addresses the leg by id.
@@ -55,12 +55,12 @@ connection:
 config :fix_alchemy, spec_file: "priv/specs/FIX44.xml"
 ```
 
-`priv/specs/FIX44.xml` ships with this package; FXCM's own `FIXFXCM10.xml`
-names the `9xxx` tags this adapter reads and is worth using if you have it.
+`priv/specs/FIX44.xml` ships with this package. FXCM's own `FIXFXCM10.xml`
+names the `9xxx` tags this adapter reads; use it if you have it.
 
 ## Quick start
 
-A session on its own, with no host application around it:
+A session on its own:
 
 ```elixir
 {:ok, conn} =
@@ -86,12 +86,11 @@ FxcmAlchemy.get_account_summary(conn)
 FixAlchemy.disconnect(conn)
 ```
 
-`defer_ready: true` and the three handlers are what make it an FXCM session
-rather than a plain FIX one. A host driving it through `FixAlchemy.Backend`
-sets both from `FxcmAlchemy.TradingBackend`.
+`defer_ready: true` and the three handlers make it an FXCM session. A host
+driving it through `FixAlchemy.Backend` sets both from
+`FxcmAlchemy.TradingBackend`.
 
-`:account` is optional and left out here; FXCM reports it at login. See
-[The account](#the-account).
+`:account` is optional; see [The account](#the-account).
 
 `FixAlchemy.connect/1` starts the session only. For P&L, start
 [`FxcmAlchemy.PositionTracker`](#positions-and-pl) as well.
@@ -105,15 +104,14 @@ orders. Supplying it skips the CollateralInquiry and requests positions and
 orders straight after logon. Either way the account is sent as tag `1` on every
 order.
 
-Until it is known, orders are refused rather than sent:
+Until it is known, orders are refused:
 
 ```elixir
 FxcmAlchemy.order(conn, "EUR/USD", 1000, :buy)
 #=> {:error, :account_unknown}
 ```
 
-The session marks the `:account` milestone once it has one, so gate on that
-rather than sleeping:
+The session marks the `:account` milestone once it has one:
 
 ```elixir
 FixAlchemy.Client.milestone_reached?(conn, :account)
@@ -153,7 +151,7 @@ FxcmAlchemy.attach_protection(conn, position, stop_loss: 1.0800, take_profit: 1.
 `size` may be `nil`, in which case the position's own quantity is used. A
 position that came from a PositionReport closes by placing an offsetting order;
 one the adapter tracked from fills closes against its `9041` leg. Any close
-larger than 100,000,000 units is refused rather than sent.
+larger than 100,000,000 units is refused.
 
 ## Positions and P&L
 
@@ -162,7 +160,7 @@ automatically by the backend. It holds positions and last prices, marks
 unrealized P&L in the account's base currency, and publishes the result on
 `"position:<connection_id>"` and `"account:<connection_id>"`.
 
-Where the backend is not doing it for you, start it alongside the session:
+Without the backend, start it alongside the session:
 
 ```elixir
 {:ok, _tracker} =
@@ -186,11 +184,11 @@ FxcmAlchemy.PnL.position_pnl(position, prices, "USD")
 
 A position in `XXX/YYY` accrues P&L in `YYY`. Where that is not the account
 currency, the tracker converts through whichever cross the price map carries
-(`ACC/YYY` or `YYY/ACC`); with neither present the position contributes `0.0`
-rather than a wrong number, so subscribe to the crosses you hold.
+(`ACC/YYY` or `YYY/ACC`); with neither present the position contributes `0.0`.
+Subscribe to the crosses you hold.
 
-Publishing goes through `FixAlchemy.PubSub`, the engine's contract, so this
-package carries no dependency on Phoenix:
+Publishing goes through `FixAlchemy.PubSub`; this package has no Phoenix
+dependency:
 
 ```elixir
 config :fxcm_alchemy,
@@ -204,8 +202,7 @@ runs and publishes nothing. `market_data_subscriber` is optional; when set, the
 tracker asks it to subscribe to the symbols it needs prices for.
 
 In a Phoenix application the default implementation forwards to
-`Phoenix.PubSub` and there is nothing further to do. Elsewhere, receive the
-updates by supplying an implementation:
+`Phoenix.PubSub`. Elsewhere, supply an implementation:
 
 ```elixir
 defmodule MyApp.FixEvents do
@@ -261,9 +258,8 @@ timestamp in seconds.
 
 ## As a FixAlchemy backend
 
-`FxcmAlchemy.TradingBackend` implements `FixAlchemy.Backend`, so a host that
-manages connections across several venues discovers it by having
-`fxcm_alchemy` as a dependency — there is nothing to register. It contributes:
+`FxcmAlchemy.TradingBackend` implements `FixAlchemy.Backend`. A host discovers
+it by depending on `fxcm_alchemy`. It contributes:
 
 - the backend id `:fxcm`, shown as "FXCM (FIX)"
 - the standard connection fields (host, port, TLS, comp ids, username,
@@ -272,18 +268,17 @@ manages connections across several venues discovers it by having
 - the three handlers, deferred readiness, and FXCM's close semantics
 - a `FxcmAlchemy.PositionTracker` per trading connection
 
-The host supplies each connection's own configuration, including credentials;
-this package stores none of it.
+The host supplies each connection's configuration, including credentials.
 
 ## Credentials
 
-This package holds no credentials and none belong in it. Passwords arrive as
-the `:password` connection option, or in the connection config a host passes
-to the backend, and are only ever written to the wire, in the Logon and
-UserRequest (`BE`) messages. Nothing here logs them.
+This package stores no credentials. Passwords arrive as the `:password`
+connection option, or in the connection config a host passes to the backend,
+and are written only to the wire, in the Logon and UserRequest (`BE`) messages.
+Nothing here logs them.
 
-For a standalone session, read them from the environment — `System.fetch_env!/1`
-as in the quick start — or from a config file kept out of version control.
+For a standalone session, read them from the environment with
+`System.fetch_env!/1`, or from a config file kept out of version control.
 
 ## Tests
 
@@ -292,5 +287,5 @@ mix test
 ```
 
 The FIX session tests run against `FxcmAlchemy.FakeFixServer`, a local socket
-that speaks enough of the protocol to drive the handshake. No network and no
-FXCM account are needed.
+speaking enough of the protocol to drive the handshake. No network or FXCM
+account needed.
