@@ -21,7 +21,8 @@ defmodule FxcmAlchemy.MixProject do
 
   defp deps do
     [
-      {:fix_alchemy, " ~> 0.2.0"},
+      {:fix_alchemy, "~> 0.3"},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:fxlite_alchemy, github: "jaman/fxlite_alchemy", optional: true},
       {:duckdbex, "~> 0.3", optional: true}
     ]

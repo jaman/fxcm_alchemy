@@ -17,8 +17,13 @@ defmodule FxcmAlchemy.HistoricalCandles.FixSession do
   def __historical_source__, do: true
 
   @doc false
-  def source_config,
-    do: %{id: :fix_session, label: "FIX session (native)", backends: [:fix, :fxcm]}
+  def source_config, do: %{id: :fix_session, label: "FIX session (native)"}
+
+  @doc false
+  def applies_to?(%{module: module}) when is_atom(module) and not is_nil(module),
+    do: function_exported?(module, :handlers, 0) and function_exported?(module, :defer_ready?, 0)
+
+  def applies_to?(_backend), do: false
 
   @weekend_pad_factor 1.5
   @weekend_pad_seconds 72 * 3600

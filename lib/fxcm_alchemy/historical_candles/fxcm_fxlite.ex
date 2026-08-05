@@ -18,7 +18,7 @@ defmodule FxcmAlchemy.HistoricalCandles.FxcmFxlite do
 
   @doc false
   def source_config,
-    do: %{id: :fxcm_fxlite, label: "FXCM fxlite platform (current)", backends: [:fxcm]}
+    do: %{id: :fxcm_fxlite, label: "FXCM fxlite platform (current)"}
 
   require Logger
 

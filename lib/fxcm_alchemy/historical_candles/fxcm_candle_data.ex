@@ -14,7 +14,7 @@ defmodule FxcmAlchemy.HistoricalCandles.FxcmCandleData do
 
   @doc false
   def source_config,
-    do: %{id: :fxcm_candledata, label: "FXCM CandleData (public, delayed)", backends: [:fxcm]}
+    do: %{id: :fxcm_candledata, label: "FXCM CandleData (public, delayed)"}
 
   require Logger
 
