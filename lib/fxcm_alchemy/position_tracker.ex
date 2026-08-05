@@ -4,6 +4,15 @@ defmodule FxcmAlchemy.PositionTracker do
 
   Subscribes to position updates from FIX Client and market data updates,
   calculates unrealized P&L, and broadcasts enriched position and account data.
+
+  Publishing goes through `FixAlchemy.PubSub`, on the server given by
+  `config :fxcm_alchemy, :pubsub_module` or, failing that, the engine's own
+  `config :fix_alchemy, :pubsub_server`. Updates are published on
+  `"position:<connection_id>"` and `"account:<connection_id>"`.
+
+  With no server configured the tracker runs and publishes nothing. A host
+  without `phoenix_pubsub` consumes the updates by configuring its own
+  `FixAlchemy.PubSub` implementation under `config :fix_alchemy, :pubsub`.
   """
 
   use GenServer
@@ -39,12 +48,13 @@ defmodule FxcmAlchemy.PositionTracker do
   def init(opts) do
     connection_id = Keyword.fetch!(opts, :connection_id)
     base_currency = Keyword.get(opts, :base_currency, "USD")
-    pubsub_module = Application.get_env(:fxcm_alchemy, :pubsub_module, TradeAlchemy.PubSub)
+
+    pubsub_module =
+      Application.get_env(:fxcm_alchemy, :pubsub_module) || FixAlchemy.PubSub.server()
+
     subscriber = Application.get_env(:fxcm_alchemy, :market_data_subscriber)
 
-    if pubsub_running?(pubsub_module) do
-      Phoenix.PubSub.subscribe(pubsub_module, "position_raw:#{connection_id}")
-    end
+    subscribe(pubsub_module, "position_raw:#{connection_id}")
 
     state = %__MODULE__{
       connection_id: connection_id,
@@ -59,8 +69,20 @@ defmodule FxcmAlchemy.PositionTracker do
     {:ok, state}
   end
 
-  defp pubsub_running?(nil), do: false
-  defp pubsub_running?(module), do: Process.whereis(module) != nil
+  defp subscribe(server, topic) do
+    if phoenix_pubsub_running?(server), do: Phoenix.PubSub.subscribe(server, topic)
+    :ok
+  end
+
+  defp unsubscribe(server, topic) do
+    if phoenix_pubsub_running?(server), do: Phoenix.PubSub.unsubscribe(server, topic)
+    :ok
+  end
+
+  defp phoenix_pubsub_running?(server) when is_atom(server) and not is_nil(server),
+    do: Code.ensure_loaded?(Phoenix.PubSub) and Process.whereis(server) != nil
+
+  defp phoenix_pubsub_running?(_server), do: false
 
   defp register_subscription(nil, _pid, _topic, _metadata), do: {:ok, :created}
 
@@ -88,7 +110,7 @@ defmodule FxcmAlchemy.PositionTracker do
       Logger.debug("PositionTracker subscribing to market data for #{symbol}")
 
       topic = "instruments:#{state.connection_id}:#{symbol}"
-      Phoenix.PubSub.subscribe(state.pubsub_module, topic)
+      subscribe(state.pubsub_module, topic)
 
       case register_subscription(
              state.market_data_subscriber,
@@ -125,7 +147,7 @@ defmodule FxcmAlchemy.PositionTracker do
       Logger.debug("PositionTracker unsubscribing from market data for #{symbol}")
 
       topic = "instruments:#{state.connection_id}:#{symbol}"
-      Phoenix.PubSub.unsubscribe(state.pubsub_module, topic)
+      unsubscribe(state.pubsub_module, topic)
 
       case deregister_subscription(state.market_data_subscriber, self(), topic) do
         {:ok, :destroyed} ->
@@ -299,7 +321,7 @@ defmodule FxcmAlchemy.PositionTracker do
       |> Enum.map(fn pos -> Map.put(pos, :connection_id, state.connection_id) end)
       |> Enum.group_by(& &1.symbol)
 
-    Phoenix.PubSub.broadcast(
+    FixAlchemy.PubSub.broadcast(
       state.pubsub_module,
       "position:#{state.connection_id}",
       {:position_update, positions_by_symbol}
@@ -316,7 +338,7 @@ defmodule FxcmAlchemy.PositionTracker do
   defp broadcast_account(nil, _state), do: :ok
 
   defp broadcast_account(base, state) do
-    Phoenix.PubSub.broadcast(
+    FixAlchemy.PubSub.broadcast(
       state.pubsub_module,
       "account:#{state.connection_id}",
       {:account_update, enrich_account_summary(base, state)}

@@ -20,5 +20,11 @@ erl_crash.dump
 *.ez
 
 # Ignore package tarball (built via "mix hex.build").
-fxlite_alchemy-*.tar
+fxcm_alchemy-*.tar
+
+# Credentials must never be committed.
+.env
+.env.*
+*.secret.exs
+config/*.secret.exs
 
