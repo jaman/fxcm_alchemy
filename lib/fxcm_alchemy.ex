@@ -62,7 +62,10 @@ defmodule FxcmAlchemy do
   @doc """
   Close a position by ID.
 
-  FXCM legs by `9041`; a netting position closes by offsetting its own quantity.
+  FXCM legs by `9041`, and a position report names the leg it describes, so a
+  position is closed by naming that leg rather than by sending an order the
+  broker has to net against something. An offsetting order closes whichever leg
+  the broker picks, which is not necessarily the one that was asked for.
   """
   @spec close_position_by_id(GenServer.server(), binary(), integer() | nil, keyword()) ::
           :ok | {:error, term()}
@@ -85,10 +88,6 @@ defmodule FxcmAlchemy do
     :ok
   end
 
-  defp close_by_provenance(conn, %{via: :report} = position, _position_id, symbol, _size, _opts) do
-    size_out(conn, symbol, signed_size(position))
-  end
-
   defp close_by_provenance(conn, position, position_id, symbol, size, opts) do
     with {:ok, signed_qty} <- resolve_signed_qty(size, position, position_id),
          {close_side, close_size} = close_order_for(signed_qty, position),
@@ -101,25 +100,6 @@ defmodule FxcmAlchemy do
         |> Keyword.put(:extra_fields, [{9041, position_id}])
 
       order(conn, symbol, close_size, close_side, opts)
-    end
-  end
-
-  defp size_out(_conn, symbol, 0) do
-    Logger.info("Nothing to size out for #{symbol}")
-    :ok
-  end
-
-  defp size_out(conn, symbol, signed) do
-    close_side = if signed > 0, do: :sell, else: :buy
-    qty = abs(signed)
-
-    case guard_order_qty(symbol, symbol, qty) do
-      :ok ->
-        Logger.info("Sizing out #{symbol}: #{close_side} #{qty}")
-        order(conn, symbol, qty, close_side, order_type: "1")
-
-      error ->
-        error
     end
   end
 
@@ -182,15 +162,6 @@ defmodule FxcmAlchemy do
 
     close_side = if long?, do: :sell, else: :buy
     {close_side, abs(signed_qty)}
-  end
-
-  defp signed_size(position) do
-    magnitude = position |> Map.get(:size, "0") |> size_to_int() |> abs()
-
-    case Map.get(position, :side) do
-      side when side in [:sell, :short] -> -magnitude
-      _long -> magnitude
-    end
   end
 
   defp size_to_int(size) when is_integer(size), do: size

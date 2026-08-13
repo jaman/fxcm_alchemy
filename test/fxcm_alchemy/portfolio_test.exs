@@ -70,6 +70,112 @@ defmodule FxcmAlchemy.PortfolioTest do
     end
   end
 
+  describe "the broker's snapshot of what is open" do
+    test "an account the broker says is flat holds nothing", %{connection_id: connection_id} do
+      dispatch_and_sync(connection_id, "AP", [
+        {"55", "GBP/JPY"},
+        {"9041", "41372236"},
+        {"704", "1000"}
+      ])
+
+      positions = dispatch_and_sync(connection_id, "AO", [{"727", "0"}, {"728", "0"}])
+
+      assert positions == %{},
+             "the broker reporting no positions is the answer, not a message to ignore"
+    end
+
+    test "a snapshot that names positions leaves them to their reports", %{
+      connection_id: connection_id
+    } do
+      dispatch_and_sync(connection_id, "AP", [
+        {"55", "GBP/JPY"},
+        {"9041", "41372236"},
+        {"704", "1000"}
+      ])
+
+      positions = dispatch_and_sync(connection_id, "AO", [{"727", "3"}, {"728", "0"}])
+
+      assert Map.has_key?(positions, "41372236"),
+             "reports are still to come; clearing here would drop what they confirm"
+    end
+
+    test "a refused request says nothing about what is open", %{connection_id: connection_id} do
+      dispatch_and_sync(connection_id, "AP", [
+        {"55", "GBP/JPY"},
+        {"9041", "41372236"},
+        {"704", "1000"}
+      ])
+
+      positions = dispatch_and_sync(connection_id, "AO", [{"727", "0"}, {"728", "2"}])
+
+      assert Map.has_key?(positions, "41372236"),
+             "a rejected request is not a statement that the account is flat"
+    end
+  end
+
+  describe "a close the broker refuses" do
+    test "a position the broker cannot find is no longer held", %{connection_id: connection_id} do
+      dispatch_and_sync(connection_id, "AP", [
+        {"55", "AUD/NZD"},
+        {"9041", "41371799"},
+        {"705", "1000"},
+        {"730", "1.2056"}
+      ])
+
+      positions =
+        dispatch_and_sync(connection_id, "8", [
+          {"55", "AUD/NZD"},
+          {"39", "8"},
+          {"150", "8"},
+          {"9041", "41371799"},
+          {"58",
+           "19915;DAS 19915: ZDas Exception ORA-20168: Cannot find a trade for order : 79832688@44939."}
+        ])
+
+      assert positions == %{},
+             "a trade the broker says does not exist must not stay on the books"
+    end
+
+    test "a refusal for another reason leaves the position alone", %{
+      connection_id: connection_id
+    } do
+      dispatch_and_sync(connection_id, "AP", [
+        {"55", "AUD/NZD"},
+        {"9041", "41371799"},
+        {"705", "1000"}
+      ])
+
+      positions =
+        dispatch_and_sync(connection_id, "8", [
+          {"55", "AUD/NZD"},
+          {"39", "8"},
+          {"150", "8"},
+          {"9041", "41371799"},
+          {"58", "Not enough margin"}
+        ])
+
+      assert Map.has_key?(positions, "41371799"),
+             "a margin refusal says nothing about whether the trade exists"
+    end
+
+    test "a refusal naming a position never held changes nothing", %{
+      connection_id: connection_id
+    } do
+      dispatch_and_sync(connection_id, "AP", [{"55", "EUR/USD"}, {"9041", "P1"}, {"704", "1000"}])
+
+      positions =
+        dispatch_and_sync(connection_id, "8", [
+          {"55", "AUD/NZD"},
+          {"39", "8"},
+          {"150", "8"},
+          {"9041", "41371799"},
+          {"58", "Cannot find a trade for order : 79832688@44939."}
+        ])
+
+      assert Map.has_key?(positions, "P1")
+    end
+  end
+
   describe "execution reports (8)" do
     test "caches an active order and drops it once filled", %{connection_id: connection_id} do
       feed(connection_id, "8", [

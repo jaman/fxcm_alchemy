@@ -340,6 +340,10 @@ defmodule FxcmAlchemy.PositionTracker do
 
   defp account_base(state) do
     FixAlchemy.Portfolio.get_account_summary(state.connection_id, :trading)
+  catch
+    :exit, _gone ->
+      Logger.debug("No portfolio to read an account from for #{state.connection_id}")
+      nil
   end
 
   defp currency_of(%{currency: currency}, _state) when is_binary(currency), do: currency

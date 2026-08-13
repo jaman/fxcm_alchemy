@@ -58,6 +58,45 @@ defmodule FxcmAlchemy.PositionTrackerTest do
     {:market_data_update, connection_id, "EUR/USD", %{bid: "1.0800", ask: "1.0802"}}
   end
 
+  describe "when the session behind it has gone" do
+    defp fill(position_id) do
+      {:position_update,
+       %{
+         position_id => %{
+           symbol: "GBP/JPY",
+           size: "1000",
+           side: :sell,
+           via: :fill,
+           avg_price: "214.874",
+           position_id: position_id,
+           last_update: DateTime.utc_now(),
+           data: %{}
+         }
+       }}
+    end
+
+    test "a position update outlives the portfolio it would have asked" do
+      tracker = start_tracker("no_session_#{System.unique_integer([:positive])}")
+      ref = Process.monitor(tracker)
+
+      send(tracker, fill("41372232"))
+
+      refute_receive {:DOWN, ^ref, :process, _pid, _reason}, 500
+
+      assert Process.alive?(tracker),
+             "a dead portfolio must not take the tracker down with it"
+    end
+
+    test "the position is still tracked without an account to price it against" do
+      tracker = start_tracker("no_session_#{System.unique_integer([:positive])}")
+
+      send(tracker, fill("41372232"))
+
+      assert %{positions: positions} = :sys.get_state(tracker)
+      assert Map.has_key?(positions, "41372232")
+    end
+  end
+
   describe "without a pubsub server configured" do
     test "survives a price update", %{connection_id: connection_id} do
       tracker = start_tracker(connection_id)

@@ -6,6 +6,12 @@ defmodule FxcmAlchemy.HistoricalCandles.FxcmCandleData do
   Weekly m1 CSVs are downloaded once into a local cache (immutable past
   weeks are kept; the current week refreshes after a short TTL) and
   aggregated to the requested timeframe with DuckDB.
+
+  Weeks are downloaded only until the request has the files it needs, and a week
+  the archive refuses temporarily — `429`, a `5xx`, a dropped connection — is
+  waited on and asked for again by `FxcmAlchemy.HistoricalCandles.Backoff`. A
+  week it answers `404` is remembered as missing and not asked for again for an
+  hour.
   """
   @behaviour FxcmAlchemy.HistoricalCandles
 
@@ -17,6 +23,8 @@ defmodule FxcmAlchemy.HistoricalCandles.FxcmCandleData do
     do: %{id: :fxcm_candledata, label: "FXCM CandleData (public, delayed)"}
 
   require Logger
+
+  alias FxcmAlchemy.HistoricalCandles.Backoff
 
   @base_url "https://candledata.fxcorporate.com"
   @minutes_per_week 5 * 24 * 60
@@ -35,8 +43,8 @@ defmodule FxcmAlchemy.HistoricalCandles.FxcmCandleData do
     files =
       symbol
       |> weekly_urls(anchor_date(before), probe_window(timeframe, count))
-      |> Enum.map(&cached_download/1)
-      |> Enum.filter(&(&1 != nil))
+      |> Stream.map(&cached_download/1)
+      |> Stream.filter(&(&1 != nil))
       |> Enum.take(weeks_needed(timeframe, count))
 
     case files do
@@ -152,18 +160,25 @@ defmodule FxcmAlchemy.HistoricalCandles.FxcmCandleData do
   defp download(url, path) do
     ensure_http_started()
 
+    case Backoff.retry(fn -> get(url, path) end) do
+      {:ok, :saved} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp get(url, path) do
     request = {String.to_charlist(url), []}
     http_opts = [ssl: ssl_options(), timeout: 30_000]
 
     case :httpc.request(:get, request, http_opts, body_format: :binary) do
       {:ok, {{_version, 200, _reason}, _headers, body}} ->
         File.write!(path, body)
-        :ok
+        {:ok, :saved}
 
-      {:ok, {{_version, status, _reason}, _headers, _body}} ->
+      {:ok, {{_version, status, _reason}, headers, _body}} ->
         Logger.warning("CandleData fetch #{url} returned HTTP #{status}")
         if status == 404, do: mark_missing(url)
-        {:error, {:http_status, status}}
+        {:error, {:http_status, status, headers}}
 
       {:error, reason} ->
         Logger.warning("CandleData fetch #{url} failed: #{inspect(reason)}")

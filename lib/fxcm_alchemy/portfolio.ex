@@ -47,6 +47,9 @@ defmodule FxcmAlchemy.Portfolio do
     status_report? = exec_type == "I" || Map.get(msg, :mass_status_req_id) != nil
 
     cond do
+      vanished?(msg, positions) ->
+        forget_vanished(positions, msg, state)
+
       !(symbol && ord_status in ["1", "2"] && !status_report?) ->
         positions
 
@@ -56,6 +59,40 @@ defmodule FxcmAlchemy.Portfolio do
       true ->
         apply_fill(positions, msg, order, order_id, state)
     end
+  end
+
+  defp vanished?(msg, positions) do
+    pos_id = refused_position(msg)
+
+    Map.get(msg, :ord_status) == "8" and pos_id != nil and
+      Map.has_key?(positions, pos_id) and refers_to_missing_trade?(msg)
+  end
+
+  defp refused_position(msg), do: Map.get(msg, :fxcm_pos_id) || raw_field(msg, "9041")
+
+  defp refers_to_missing_trade?(msg) do
+    [Map.get(msg, :text), raw_field(msg, "58"), raw_field(msg, "9029")]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.any?(&(&1 |> String.downcase() |> String.contains?("cannot find a trade")))
+  end
+
+  defp raw_field(msg, tag) do
+    case Map.get(msg, :raw) do
+      raw when is_binary(raw) -> raw |> Parser.split_fields() |> Map.new() |> Map.get(tag)
+      _absent -> nil
+    end
+  end
+
+  defp forget_vanished(positions, msg, state) do
+    pos_id = refused_position(msg)
+
+    Logger.info(
+      "Position #{pos_id} refused as unknown to the broker, dropping it: " <>
+        inspect(Map.get(msg, :text) || raw_field(msg, "58")),
+      source: state.process_name
+    )
+
+    Map.delete(positions, pos_id)
   end
 
   @impl FixAlchemy.Portfolio
