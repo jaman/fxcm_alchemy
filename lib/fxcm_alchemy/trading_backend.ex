@@ -42,6 +42,7 @@ defmodule FxcmAlchemy.TradingBackend do
       [] ->
         tracker_opts = [
           connection_id: connection_id,
+          session_name: Keyword.get(config, :session_name, :trading),
           base_currency: Keyword.get(config, :base_currency, "USD"),
           initial_balance: Keyword.get(config, :initial_balance, 10_000.0),
           pubsub_module: Keyword.get(config, :pubsub_module),

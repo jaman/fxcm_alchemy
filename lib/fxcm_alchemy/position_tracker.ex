@@ -13,6 +13,11 @@ defmodule FxcmAlchemy.PositionTracker do
   `:market_data_subscriber` names the module the tracker asks for prices, so a
   tracker is told what to subscribe through rather than reading it globally.
 
+  `:session_name` names the session whose portfolio holds the account, and must
+  match the session the connection runs under. A tracker pointed at a session
+  that does not exist reads no account, and an account is what carries P&L, so
+  the panel goes quiet without anything failing.
+
   With no server configured the tracker runs and publishes nothing. A host
   without `phoenix_pubsub` consumes the updates by configuring its own
   `FixAlchemy.PubSub` implementation under `config :fix_alchemy, :pubsub`.
@@ -25,6 +30,7 @@ defmodule FxcmAlchemy.PositionTracker do
 
   defstruct [
     :connection_id,
+    :session_name,
     :base_currency,
     :pubsub_module,
     :market_data_subscriber,
@@ -59,6 +65,7 @@ defmodule FxcmAlchemy.PositionTracker do
 
     state = %__MODULE__{
       connection_id: connection_id,
+      session_name: Keyword.get(opts, :session_name, :trading),
       base_currency: base_currency,
       pubsub_module: pubsub_module,
       market_data_subscriber: subscriber,
@@ -339,7 +346,7 @@ defmodule FxcmAlchemy.PositionTracker do
   end
 
   defp account_base(state) do
-    FixAlchemy.Portfolio.get_account_summary(state.connection_id, :trading)
+    FixAlchemy.Portfolio.get_account_summary(state.connection_id, state.session_name)
   catch
     :exit, _gone ->
       Logger.debug("No portfolio to read an account from for #{state.connection_id}")
