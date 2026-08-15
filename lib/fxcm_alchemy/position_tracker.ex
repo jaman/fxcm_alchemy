@@ -2,8 +2,16 @@ defmodule FxcmAlchemy.PositionTracker do
   @moduledoc """
   Tracks positions and calculates P&L for FIX connections.
 
-  Subscribes to position updates from FIX Client and market data updates,
-  calculates unrealized P&L, and broadcasts enriched position and account data.
+  Subscribes to position updates from FIX Client and market data updates, and
+  broadcasts enriched position and account data.
+
+  A quote is recorded when it arrives and nothing more. Unrealized P&L is
+  calculated when `snapshot/1` asks for it, against the quotes held at that
+  moment. Positions are published when they open, close or change size, which is
+  when they are news.
+
+  Realized P&L is not tracked here. It is accrued by the portfolio, which is
+  what sees positions close, and read from the account summary it serves.
 
   Publishing goes through `FixAlchemy.PubSub`, on the server given by the
   `:pubsub_module` start option or, failing that, the engine's own
@@ -13,10 +21,9 @@ defmodule FxcmAlchemy.PositionTracker do
   `:market_data_subscriber` names the module the tracker asks for prices, so a
   tracker is told what to subscribe through rather than reading it globally.
 
-  `:session_name` names the session whose portfolio holds the account, and must
-  match the session the connection runs under. A tracker pointed at a session
-  that does not exist reads no account, and an account is what carries P&L, so
-  the panel goes quiet without anything failing.
+  The account is read from the portfolio of the session named by
+  `:session_name`, which comes from the connection's settings and defaults to
+  `:trading`.
 
   With no server configured the tracker runs and publishes nothing. A host
   without `phoenix_pubsub` consumes the updates by configuring its own
@@ -35,14 +42,31 @@ defmodule FxcmAlchemy.PositionTracker do
     :pubsub_module,
     :market_data_subscriber,
     positions: %{},
-    current_prices: %{},
-    realized_pnl: 0.0
+    current_prices: %{}
   ]
 
   def start_link(opts) do
     connection_id = Keyword.fetch!(opts, :connection_id)
     name = {:via, Registry, {FixAlchemy.Registry, {connection_id, :position_tracker}}}
     GenServer.start_link(__MODULE__, opts, name: name)
+  end
+
+  @doc """
+  The positions priced against the latest quotes, with the account they sit in.
+
+  Prices are folded in when asked rather than as they arrive, so a quiet reader
+  costs nothing and a busy instrument costs one calculation per question instead
+  of one per tick.
+
+  Returns `%{positions: map(), account: map() | nil}`. A position whose
+  instrument has not been quoted yet is returned at the P&L it last carried.
+  """
+  @spec snapshot(binary()) :: %{positions: map(), account: map() | nil}
+  def snapshot(connection_id) do
+    case Registry.lookup(FixAlchemy.Registry, {connection_id, :position_tracker}) do
+      [{pid, _}] -> GenServer.call(pid, :snapshot)
+      [] -> %{positions: %{}, account: nil}
+    end
   end
 
   def child_spec(opts) do
@@ -70,8 +94,7 @@ defmodule FxcmAlchemy.PositionTracker do
       pubsub_module: pubsub_module,
       market_data_subscriber: subscriber,
       positions: %{},
-      current_prices: %{},
-      realized_pnl: 0.0
+      current_prices: %{}
     }
 
     {:ok, state}
@@ -156,24 +179,7 @@ defmodule FxcmAlchemy.PositionTracker do
       ask: parse_float(Map.get(data, :ask))
     }
 
-    new_current_prices = Map.put(state.current_prices, symbol, price_data)
-    base = account_base(state)
-    currency = currency_of(base, state)
-
-    positions_with_pnl =
-      calculate_all_pnl(state.positions, new_current_prices, currency)
-
-    new_state = %{
-      state
-      | positions: positions_with_pnl,
-        current_prices: new_current_prices,
-        base_currency: currency
-    }
-
-    broadcast_positions(new_state)
-    broadcast_account(base, new_state)
-
-    {:noreply, new_state}
+    {:noreply, %{state | current_prices: Map.put(state.current_prices, symbol, price_data)}}
   end
 
   @impl true
@@ -200,6 +206,16 @@ defmodule FxcmAlchemy.PositionTracker do
   @impl true
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  @impl true
+  def handle_call(:snapshot, _from, state) do
+    base = account_base(state)
+    currency = currency_of(base, state)
+    priced = calculate_all_pnl(state.positions, state.current_prices, currency)
+    state = %{state | positions: priced, base_currency: currency}
+
+    {:reply, %{positions: priced, account: account_summary(base, state)}, state}
   end
 
   defp normalize_positions(positions) when is_map(positions) do
@@ -349,12 +365,28 @@ defmodule FxcmAlchemy.PositionTracker do
     FixAlchemy.Portfolio.get_account_summary(state.connection_id, state.session_name)
   catch
     :exit, _gone ->
-      Logger.debug("No portfolio to read an account from for #{state.connection_id}")
+      warn_once_of_missing_portfolio(state)
       nil
+  end
+
+  defp warn_once_of_missing_portfolio(state) do
+    seen = {__MODULE__, :no_portfolio, state.connection_id}
+
+    unless Process.get(seen) do
+      Process.put(seen, true)
+
+      Logger.warning(
+        "No portfolio for #{state.connection_id} on session #{inspect(state.session_name)}; " <>
+          "account and P&L will stay empty until one is running"
+      )
+    end
   end
 
   defp currency_of(%{currency: currency}, _state) when is_binary(currency), do: currency
   defp currency_of(_base, state), do: state.base_currency
+
+  defp account_summary(nil, _state), do: nil
+  defp account_summary(base, state), do: enrich_account_summary(base, state)
 
   defp broadcast_account(nil, _state), do: :ok
 
@@ -374,14 +406,15 @@ defmodule FxcmAlchemy.PositionTracker do
       |> Enum.sum()
 
     balance = base.balance
+    realized = Map.get(base, :realized_pnl, 0.0)
 
     %{
       account_id: base.account_id,
       balance: balance,
       equity: balance + total_unrealized_pnl,
       unrealized_pnl: total_unrealized_pnl,
-      realized_pnl: state.realized_pnl,
-      total_pnl: state.realized_pnl + total_unrealized_pnl,
+      realized_pnl: realized,
+      total_pnl: realized + total_unrealized_pnl,
       margin_used: base.margin_used,
       margin_available: base.margin_available,
       currency: base.currency,

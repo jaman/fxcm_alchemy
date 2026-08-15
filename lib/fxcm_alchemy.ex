@@ -60,12 +60,16 @@ defmodule FxcmAlchemy do
   defp tag_position(position), do: position
 
   @doc """
-  Close a position by ID.
+  Close the position `position_id` names, in whole or in part.
 
-  FXCM legs by `9041`, and a position report names the leg it describes, so a
-  position is closed by naming that leg rather than by sending an order the
-  broker has to net against something. An offsetting order closes whichever leg
-  the broker picks, which is not necessarily the one that was asked for.
+  `size` closes that many units; `nil` closes the whole position. The order
+  carries FXCMPosID (`9041`) and PositionEffect `77=C`, so it closes that leg
+  and no other.
+
+  Returns `{:error, :position_not_found}` when the session holds no such
+  position, `{:error, :no_symbol}` or `{:error, :no_size}` when it holds one it
+  cannot describe, and `{:error, :quantity_too_large}` when the size asked for
+  is beyond anything the venue would accept.
   """
   @spec close_position_by_id(GenServer.server(), binary(), integer() | nil, keyword()) ::
           :ok | {:error, term()}

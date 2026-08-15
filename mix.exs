@@ -4,7 +4,7 @@ defmodule FxcmAlchemy.MixProject do
   def project do
     [
       app: :fxcm_alchemy,
-      version: "0.1.1",
+      version: "0.1.2",
       elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -21,10 +21,17 @@ defmodule FxcmAlchemy.MixProject do
 
   defp deps do
     [
-      {:fix_alchemy, "~> 0.3"},
+      fix_alchemy(),
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:fxlite_alchemy, github: "jaman/fxlite_alchemy", optional: true},
       {:duckdbex, "~> 0.3", optional: true}
     ]
+  end
+
+  defp fix_alchemy do
+    case System.get_env("FIX_ALCHEMY_PATH") do
+      nil -> {:fix_alchemy, "~> 0.3"}
+      path -> {:fix_alchemy, path: path, override: true}
+    end
   end
 end

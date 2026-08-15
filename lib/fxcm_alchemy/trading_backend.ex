@@ -34,6 +34,9 @@ defmodule FxcmAlchemy.TradingBackend do
   def trading_module, do: FxcmAlchemy
 
   @impl FixAlchemy.Backend
+  def position_snapshot(connection_id), do: FxcmAlchemy.PositionTracker.snapshot(connection_id)
+
+  @impl FixAlchemy.Backend
   def start_extras(connection_id, config) do
     case Registry.lookup(FixAlchemy.Registry, {connection_id, :position_tracker}) do
       [{pid, _}] when is_pid(pid) ->

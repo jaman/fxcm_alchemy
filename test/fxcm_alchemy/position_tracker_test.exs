@@ -152,14 +152,89 @@ defmodule FxcmAlchemy.PositionTrackerTest do
       :ok
     end
 
-    test "broadcasts positions and account on a price update", %{connection_id: connection_id} do
+    test "a price on its own is noted, not published", %{connection_id: connection_id} do
       tracker = start_tracker(connection_id, pubsub_module: :test_pubsub_server)
 
       send(tracker, price_update(connection_id))
 
+      refute_receive {:broadcast, _topic, {:position_update, _positions}}, 300
+
+      assert Process.alive?(tracker),
+             "a price that changes no position is worth remembering, not announcing"
+    end
+
+    test "a position opening or closing is published", %{connection_id: connection_id} do
+      tracker = start_tracker(connection_id, pubsub_module: :test_pubsub_server)
+
+      send(tracker, {:position_update, %{"P1" => held("EUR/USD", "1.0800")}})
+
       assert_receive {:broadcast, topic, {:position_update, _positions}}, 1000
       assert topic == "position:#{connection_id}"
-      assert Process.alive?(tracker)
+    end
+  end
+
+  describe "profit and loss on demand" do
+    defp held(symbol, entry) do
+      %{
+        symbol: symbol,
+        size: "1000",
+        side: :buy,
+        via: :fill,
+        avg_price: entry,
+        position_id: "P1",
+        last_update: DateTime.utc_now(),
+        data: %{}
+      }
+    end
+
+    test "asking prices the position against the latest quote", %{connection_id: connection_id} do
+      tracker = start_tracker(connection_id)
+
+      send(tracker, {:position_update, %{"P1" => held("EUR/USD", "1.0800")}})
+
+      send(
+        tracker,
+        {:market_data_update, connection_id, "EUR/USD", %{bid: "1.0850", ask: "1.0852"}}
+      )
+
+      %{positions: positions} = PositionTracker.snapshot(connection_id)
+
+      assert %{"P1" => priced} = positions
+      assert priced.unrealized_pnl > 0, "a long held into a higher bid is in profit"
+    end
+
+    test "a later quote moves the answer without any update in between", %{
+      connection_id: connection_id
+    } do
+      tracker = start_tracker(connection_id)
+
+      send(tracker, {:position_update, %{"P1" => held("EUR/USD", "1.0800")}})
+
+      send(
+        tracker,
+        {:market_data_update, connection_id, "EUR/USD", %{bid: "1.0850", ask: "1.0852"}}
+      )
+
+      first = PositionTracker.snapshot(connection_id).positions["P1"].unrealized_pnl
+
+      send(
+        tracker,
+        {:market_data_update, connection_id, "EUR/USD", %{bid: "1.0900", ask: "1.0902"}}
+      )
+
+      second = PositionTracker.snapshot(connection_id).positions["P1"].unrealized_pnl
+
+      assert second > first
+    end
+
+    test "with no quote yet the position is reported unpriced", %{connection_id: connection_id} do
+      tracker = start_tracker(connection_id)
+
+      send(tracker, {:position_update, %{"P1" => held("EUR/USD", "1.0800")}})
+
+      %{positions: positions} = PositionTracker.snapshot(connection_id)
+
+      assert Map.has_key?(positions, "P1")
     end
   end
 end

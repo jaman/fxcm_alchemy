@@ -184,6 +184,28 @@ defmodule FxcmAlchemy.Portfolio do
     end
   end
 
+  @impl FixAlchemy.Portfolio
+  def realized_pnl(closed, msg, _state) do
+    case stated(msg, :fxcm_pos_close_pnl) do
+      gross when is_float(gross) -> gross - (stated(msg, :fxcm_pos_commission) || 0.0)
+      nil -> Base.standard_realized_pnl(closed, msg)
+    end
+  end
+
+  defp stated(msg, key), do: msg |> Map.get(key) |> float_or_nil()
+
+  defp float_or_nil(value) when is_float(value), do: value
+  defp float_or_nil(value) when is_integer(value), do: value * 1.0
+
+  defp float_or_nil(value) when is_binary(value) do
+    case Float.parse(value) do
+      {parsed, _rest} -> parsed
+      :error -> nil
+    end
+  end
+
+  defp float_or_nil(_value), do: nil
+
   defp collateral_summary(collateral, state) do
     balance = Base.parse_float(Map.get(collateral, :end_cash))
     equity = nonzero_or(Base.parse_float(Map.get(collateral, :total_net_value)), balance)
@@ -192,6 +214,8 @@ defmodule FxcmAlchemy.Portfolio do
     usable =
       nonzero_or(Base.parse_float(Map.get(collateral, :margin_excess)), equity - margin_used)
 
+    realized = Map.get(state, :realized_pnl, 0.0)
+
     %{
       account_id: Map.get(collateral, :account) || Base.active_account(state) || "N/A",
       balance: balance,
@@ -199,7 +223,9 @@ defmodule FxcmAlchemy.Portfolio do
       margin_used: margin_used,
       margin_available: usable,
       currency: presence(Map.get(collateral, :currency)),
-      unrealized_pnl: 0.0
+      unrealized_pnl: 0.0,
+      realized_pnl: realized,
+      total_pnl: realized
     }
   end
 
